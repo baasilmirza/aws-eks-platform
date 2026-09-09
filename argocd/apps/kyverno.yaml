@@ -22,6 +22,7 @@ spec:
       kind: CustomResourceDefinition
       jsonPointers:
         - /metadata/annotations
+        - /metadata/labels
   syncPolicy:
     automated:
       prune: true
