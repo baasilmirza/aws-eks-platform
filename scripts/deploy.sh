@@ -29,6 +29,19 @@ rm -rf "$TMP_APP"
 echo "==> update kubeconfig"
 aws eks update-kubeconfig --region "$REGION" --name "$CLUSTER_NAME"
 
+echo "==> install CRDs via server-side apply (large schemas exceed kubectl's 256KB annotation limit)"
+CRD_TMP="$(mktemp -d)"
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null
+helm repo add kyverno https://kyverno.github.io/kyverno/ >/dev/null
+helm repo update >/dev/null
+helm pull kyverno/kyverno --version 3.9.0 --untar --untardir "$CRD_TMP" >/dev/null
+helm pull prometheus-community/kube-prometheus-stack --version 90.0.0 --untar --untardir "$CRD_TMP" >/dev/null
+kubectl apply --server-side --force-conflicts -f "$CRD_TMP/kube-prometheus-stack/charts/crds/crds/"
+helm template kyverno "$CRD_TMP/kyverno" -n kyverno > "$CRD_TMP/kyverno-rendered.yaml"
+awk 'BEGIN{RS="---\n"} /kind: CustomResourceDefinition/' "$CRD_TMP/kyverno-rendered.yaml" \
+  | kubectl apply --server-side --force-conflicts -f -
+rm -rf "$CRD_TMP"
+
 echo "==> install Argo CD"
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -n argocd \

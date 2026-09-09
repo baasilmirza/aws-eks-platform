@@ -23,11 +23,12 @@ Terraform ──> EKS (control plane + node) ──> Argo CD ──> app + obser
                         ┌────────────────────────────────────────────┐
                         │              AWS account                  │
                         │  ┌──────────────────────────────────────┐  │
-                        │  │  VPC (single AZ, public, no NAT)     │  │
+                        │  │  VPC (2 public subnets / 2 AZs)      │  │
                         │  │    └─ EKS cluster (1.35)             │  │
                         │  │         ├─ OIDC provider  ──> IAM    │  │
                         │  │         │       role (IRSA)          │  │
-                        │  │         └─ node group (t3.medium)    │  │
+                        │  │         └─ node group (t3.medium,    │  │
+                        │  │              single AZ)              │  │
                         │  │              └─ Argo CD              │  │
                         │  │                   ├─ portfolio-app   │  │
                         │  │                   ├─ Prometheus/     │  │
@@ -41,10 +42,11 @@ Terraform ──> EKS (control plane + node) ──> Argo CD ──> app + obser
 
 Key design choices, all cost-driven (no Free Tier here):
 
-- **Single AZ, public subnet, no NAT, no ALB** — the node gets a public IP and egresses through an internet gateway. NAT (~$32/mo) and load balancers are skipped; access to the app, Argo CD, and Grafana is via `kubectl port-forward`.
-- **One `t3.medium` node** — small enough to stay cheap (~$0.04/h), large enough to host Argo CD + the app + a trimmed Prometheus/Grafana + Kyverno together. This is a deliberate deviation from "smallest possible node" for memory headroom, documented here rather than hidden.
+- **No NAT, no ALB** — two public subnets (EKS requires the control plane to span two AZs), but a **single node in one AZ**. The node gets a public IP and egresses through an internet gateway. NAT (~$32/mo) and load balancers are skipped; access to the app, Argo CD, and Grafana is via `kubectl port-forward`.
+- **One `t3.medium` node** — small enough to stay cheap (~$0.04/h), large enough to host Argo CD + the app + a trimmed Prometheus/Grafana + Kyverno together. Argo CD's unused extras (dex, notifications, application-set) are scaled to zero to stay under the node's ~17-pod limit.
 - **ECR for the app image** — built once, pushed to a private in-region registry, pulled by the node's IAM role. No public registry, no pull secrets.
 - **IRSA over access keys** — the OIDC provider maps a Kubernetes service account to an IAM role; the trust policy is scoped to that one service account in that one namespace.
+- **Access entries over `aws-auth`** — EKS 1.35 grants admin via an access entry, not the legacy ConfigMap; Terraform declares it for the operator principal.
 
 ## Repository layout
 
@@ -65,7 +67,7 @@ helm/
 └── kyverno/              # kyverno dependency, admission controller only
 argocd/
 ├── bootstrap/root-app.yaml   # app-of-apps entrypoint
-├── apps/                     # child apps: portfolio-app, observability, kyverno, irsa-demo
+├── apps/                     # child apps: portfolio-app, observability, kyverno, kyverno-policies, irsa-demo
 └── irsa-demo/                # namespace + annotated SA + Job (proves IRSA)
 kyverno/
 └── policies/             # require-labels, require-requests-limits, disallow-privileged
@@ -125,6 +127,12 @@ docs/
 - **Kyverno `Enforce`** — pods in `portfolio` must carry labels and set CPU/memory requests+limits; privileged containers are denied cluster-wide.
 - **App runs as non-root** (`runAsNonRoot: true`, uid 1000) — inherited from the P1 image, enforced by the chart.
 - **ECR scans on push** and expires old images after 3.
+
+## Known quirks
+
+- **CRDs need server-side apply** — Kyverno and Prometheus ship CRDs whose schemas exceed Kubernetes' 256KB `last-applied-configuration` limit, so client-side `kubectl apply` (Argo CD's default) fails with `metadata.annotations: Too long`. `deploy.sh` installs them with `kubectl apply --server-side`, and the Argo CD apps carry `ignoreDifferences` on CRD annotations/labels so drift detection doesn't fight the out-of-band install.
+- **Prometheus operator restarts blind** — the operator caches API discovery at startup; if it starts before its CRDs exist, it needs a `rollout restart` to re-discover them.
+- **EKS access is via Access Entries** — EKS 1.35 uses access entries, not the `aws-auth` ConfigMap. Terraform declares the operator principal's access entry in `modules/eks`.
 
 ## Destroy
 

@@ -40,16 +40,27 @@ The trust policy is the whole ballgame. It is scoped to **one service account, i
 Here is the proof, captured from the live cluster. A job bound to the annotated service account:
 
 ```
-<IRSA_JOB_OUTPUT>
+--- identity assumed via IRSA ---
+{
+    "UserId": "AROAQLVP23GNMUEYZHQ3N:botocore-session-1788918858",
+    "Account": "025064823194",
+    "Arn": "arn:aws:sts::025064823194:assumed-role/eks-irsa-demo/botocore-session-1788918858"
+}
+--- list demo bucket (least-privilege read) ---
 ```
 
-And a control pod — same `aws sts get-caller-identity`, but the *default* service account, no annotation:
+The pod is `eks-irsa-demo` — the exact role, nothing else. Then the negative control. A pod with **no** annotation falls back to the *node's* IAM role through the instance metadata service — which is precisely the anti-pattern IRSA exists to kill. When it tries to read the demo bucket, the node role has no business there:
 
 ```
-<IRSA_DENY_OUTPUT>
+aws s3 ls s3://baasilmirza-eks-irsa-demo-025064823194/
+An error occurred (AccessDenied) when calling the ListObjectsV2 operation:
+User: arn:aws:sts::025064823194:assumed-role/portfolio-eks-node-eks-node-group-.../i-...
+is not authorized to perform: s3:ListBucket on resource:
+"arn:aws:s3:::baasilmirza-eks-irsa-demo-025064823194"
+because no identity-based policy allows the s3:ListBucket action
 ```
 
-One pod is a first-class AWS principal. The other is nobody. No keys were created, no secrets were stored, and the whole identity is revoked the instant I delete the service account.
+One pod is the precise, least-privilege principal. The other inherits a shared node identity that can't even touch the bucket. No keys were created, no secrets were stored, and the whole identity is revoked the instant I delete the service account.
 
 The role itself is least-privilege in the boring, correct way: `s3:ListBucket` + `s3:GetObject` on exactly one demo bucket. Not `s3:*`, not `*:*`.
 
@@ -85,7 +96,25 @@ Kyverno sits as an admission webhook and enforces three policies. Two are scoped
 The happy path just works: the app chart already sets its labels and resources. The interesting part is the negative test — a pod that violates the policy:
 
 ```
-<KYVERNO_DENY_OUTPUT>
+$ kubectl run bad-pod -n portfolio --image=nginx --restart=Never
+Error from server: admission webhook "validate.kyverno.svc-fail" denied the request:
+
+resource Pod/portfolio/bad-pod was blocked due to the following policies
+
+require-labels:
+  require-team-and-app-labels: 'validation error: Pods in the 'portfolio' namespace
+    must have 'team' and 'app.kubernetes.io/name' labels. ...'
+
+require-requests-limits:
+  require-resource-requests-and-limits: 'validation error: Pods in the 'portfolio'
+    namespace must set CPU and memory requests and limits. ...'
+
+$ kubectl run priv-pod -n portfolio --image=nginx --restart=Never --privileged
+Error from server: admission webhook "validate.kyverno.svc-fail" denied the request:
+
+disallow-privileged:
+  disallow-privileged-containers: 'validation error: Privileged containers are not
+    allowed. securityContext.privileged must be unset or false. ...'
 ```
 
 Admission control is where "we have a policy" becomes "the cluster enforces the policy." A human forgetting a label gets a hard `denied`, not a nagging email.
@@ -97,23 +126,37 @@ The least glamorous skill in this project, and the one that saves real money: de
 `terraform destroy` is necessary but not sufficient. EKS creates things Terraform doesn't track — load balancers from a `LoadBalancer` service, EBS volumes from a `PersistentVolume`, security groups touched by controllers. The SPEC's orphan check is a list, and I ran it:
 
 ```
-<ORPHAN_CHECK_OUTPUT>
+EKS clusters:      (none)
+ELBs:              (none)
+EBS volumes:       (none)
+security groups:   (none)
+IAM roles:         (none)
+ECR repos:         (none)
+IRSA demo bucket:  NoSuchBucket
+CloudWatch groups: (none)
 ```
 
-Empty everywhere: no ELBs, no EBS volumes, no stray security groups, no IAM roles, no ECR repos, no CloudWatch log groups, no demo bucket. Then the state backend itself — S3 bucket and DynamoDB lock table — is destroyed last, so there is no state file keeping the ghost of a cluster alive.
+54 Terraform resources destroyed, then every orphan check empty: no ELBs, no EBS volumes, no stray security groups, no IAM roles, no ECR repos, no CloudWatch log groups, no demo bucket. Then the state backend itself — S3 bucket and DynamoDB lock table — is destroyed last, so there is no state file keeping the ghost of a cluster alive.
 
 The rule I came away with: **the cluster isn't gone until you've looked, not until Terraform says so.**
 
 ## What Broke Along the Way
 
-- **Private GHCR image** — the P1 app image lived in GitHub's registry as `private`. The EKS node couldn't pull it. Fix: push to a private **ECR** repository in-region instead; the node's IAM role pulls it with no secrets. It also matched the project spec, which lists ECR as a required service.
-- **Single-node memory pressure** — Argo CD + Prometheus + Grafana + Kyverno on one `t3.medium` means you think about resource requests for real. The observability chart is trimmed (alertmanager off, small limits) and Kyverno runs admission-only, not its background/report controllers.
-- **Subnet public-IP gotcha** — a node in a public subnet still needs `map_public_ip_on_launch = true` or it can't reach the internet to pull images. Easy to miss, instantly obvious when the node won't join.
+This project was the most "everything broke, then I fixed it" of the portfolio so far. The honest list:
+
+- **EKS needs two AZs, not one** — my first `terraform apply` failed with `Subnets specified must be in at least two different AZs`. The control plane spans two AZs even when the node group is single-AZ. Fix: two public subnets for the cluster, one subnet for the single node.
+- **AL2 is dead on modern EKS** — `AMI Type AL2_x86_64 is only supported for kubernetes versions 1.32 or earlier`. Switched to `AL2023_x86_64_STANDARD`.
+- **Access entries, not `aws-auth`** — a brand-new EKS cluster returns `401 Unauthorized` to the very IAM user who created it, because new clusters use EKS Access Entries, not the `aws-auth` ConfigMap. Fix: an `access_entries` block granting my principal `AmazonEKSClusterAdminPolicy`.
+- **Private GHCR image** — the P1 app image lived in GitHub's registry as `private`. The EKS node couldn't pull it. Fix: push to a private **ECR** repository in-region; the node's IAM role pulls it with no secrets. Also matched the spec, which lists ECR as a required service.
+- **CRDs too big for `kubectl apply`** — Kyverno and Prometheus ship CRDs whose schemas exceed Kubernetes' 256KB limit for the `last-applied-configuration` annotation, so Argo CD couldn't apply them at all: `metadata.annotations: Too long: may not be more than 262144 bytes`. Fix: install the CRDs with `kubectl apply --server-side`, and tell Argo CD to ignore CRD annotation/label diffs.
+- **Single-node pod pressure** — a `t3.medium` caps at ~17 pods, and Argo CD + Prometheus + Grafana + Kyverno + the app want more. Fix: scale Argo CD's unused extras (dex, notifications, application-set) to zero, and trim the observability chart (alertmanager off, small limits).
+- **The Prometheus operator starts blind** — it cached API discovery before the CRDs existed, so it never created the Prometheus server until a `rollout restart` made it re-discover them.
 
 ## Lessons Learned
 
-- **Cost shapes architecture.** Single-AZ, no NAT, no ALB isn't a compromise — it's the correct design for an ephemeral demo, and it forced me to understand egress paths.
-- **IRSA is a trust-policy problem, not a secrets problem.** Get the OIDC subject condition right and the security model falls out of it.
+- **Cost shapes architecture.** Single-AZ node, no NAT, no ALB isn't a compromise — it's the correct design for an ephemeral demo, and it forced me to understand egress paths.
+- **IRSA is a trust-policy problem, not a secrets problem.** Get the OIDC subject condition right and the security model falls out of it. And without IRSA, pods silently inherit the node's IAM role — the exact anti-pattern the demo exposes.
+- **New-cloud versions bite.** EKS 1.35 dropped AL2, switched to access entries, and ships CRDs that outgrow client-side apply. The platform moves under you; IaC pins it in place.
 - **GitOps and policy make the demo self-documenting.** The repo is the system; `verify.sh` is the proof.
 - **Destroy is part of the build.** The orphan check is the difference between "I think it's gone" and "it's gone."
 
