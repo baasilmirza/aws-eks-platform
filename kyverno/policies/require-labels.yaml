@@ -1,0 +1,23 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-labels
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: require-team-and-app-labels
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - portfolio
+      validate:
+        message: "Pods in the 'portfolio' namespace must have 'team' and 'app.kubernetes.io/name' labels."
+        pattern:
+          metadata:
+            labels:
+              team: "?*"
+              app.kubernetes.io/name: "?*"

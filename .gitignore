@@ -1,0 +1,26 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+_override.tf
+_override.tf.json
+tfplan
+*.plan
+
+# Local / tooling
+.venv/
+__pycache__/
+*.pyc
+kubeconfig
+*.kubeconfig
+
+# Personal planning docs (kept local only)
+SPEC.md
+INSTRUCTIONS.md

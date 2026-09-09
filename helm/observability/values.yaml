@@ -1,0 +1,40 @@
+kube-prometheus-stack:
+  alertmanager:
+    enabled: false
+
+  grafana:
+    enabled: true
+    adminPassword: admin
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+  prometheus:
+    prometheusSpec:
+      retention: 1d
+      resources:
+        requests:
+          cpu: 200m
+          memory: 400Mi
+        limits:
+          cpu: 500m
+          memory: 900Mi
+
+  prometheusOperator:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+  kubeStateMetrics:
+    enabled: true
+
+  nodeExporter:
+    enabled: true

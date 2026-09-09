@@ -1,0 +1,9 @@
+apiVersion: v2
+name: observability
+description: Prometheus + Grafana stack (kube-prometheus-stack) trimmed for a single-node cluster
+type: application
+version: 0.1.0
+dependencies:
+  - name: kube-prometheus-stack
+    version: 90.0.0
+    repository: https://prometheus-community.github.io/helm-charts

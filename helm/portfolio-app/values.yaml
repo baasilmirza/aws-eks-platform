@@ -1,0 +1,31 @@
+replicaCount: 1
+
+image:
+  repository: 025064823194.dkr.ecr.us-east-1.amazonaws.com/portfolio-app
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  name: portfolio-app
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+probes:
+  liveness:
+    path: /health
+    port: 8000
+  readiness:
+    path: /health
+    port: 8000

@@ -1,0 +1,20 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: irsa-demo
+  namespace: irsa-demo
+spec:
+  template:
+    spec:
+      serviceAccountName: irsa-sa
+      restartPolicy: Never
+      containers:
+        - name: aws-cli
+          image: public.ecr.aws/aws-cli/aws-cli:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "--- identity assumed via IRSA ---"
+              aws sts get-caller-identity
+              echo "--- list demo bucket (least-privilege read) ---"
+              aws s3 ls s3://baasilmirza-eks-irsa-demo-025064823194/
