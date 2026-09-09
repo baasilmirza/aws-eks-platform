@@ -4,22 +4,24 @@ data "aws_region" "current" {}
 module "vpc" {
   source = "./modules/vpc"
 
-  name               = var.cluster_name
-  cidr               = var.vpc_cidr
-  availability_zone  = var.availability_zone
-  public_subnet_cidr = var.public_subnet_cidr
-  tags               = var.tags
+  name                = var.cluster_name
+  cidr                = var.vpc_cidr
+  availability_zones  = var.availability_zones
+  public_subnet_cidrs = var.public_subnet_cidrs
+  tags                = var.tags
 }
 
 module "eks" {
   source = "./modules/eks"
 
-  cluster_name    = var.cluster_name
-  cluster_version = var.cluster_version
-  vpc_id          = module.vpc.vpc_id
-  subnet_ids      = module.vpc.public_subnet_ids
-  instance_type   = var.instance_type
-  tags            = var.tags
+  cluster_name                = var.cluster_name
+  cluster_version             = var.cluster_version
+  vpc_id                      = module.vpc.vpc_id
+  subnet_ids                  = module.vpc.public_subnet_ids
+  node_subnet_ids             = [module.vpc.public_subnet_ids[0]]
+  instance_type               = var.instance_type
+  cluster_admin_principal_arn = data.aws_caller_identity.current.arn
+  tags                        = var.tags
 }
 
 module "ecr" {

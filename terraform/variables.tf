@@ -4,10 +4,10 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-variable "availability_zone" {
-  description = "Single availability zone for the cost-controlled cluster"
-  type        = string
-  default     = "us-east-1a"
+variable "availability_zones" {
+  description = "Availability zones for the VPC subnets (EKS control plane needs >= 2 AZs)"
+  type        = list(string)
+  default     = ["us-east-1a", "us-east-1b"]
 }
 
 variable "environment" {
@@ -34,10 +34,10 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
-variable "public_subnet_cidr" {
-  description = "CIDR block for the single public subnet"
-  type        = string
-  default     = "10.0.0.0/24"
+variable "public_subnet_cidrs" {
+  description = "CIDR blocks for the public subnets (one per AZ)"
+  type        = list(string)
+  default     = ["10.0.0.0/24", "10.0.1.0/24"]
 }
 
 variable "instance_type" {

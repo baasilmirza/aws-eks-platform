@@ -8,14 +8,14 @@ variable "cidr" {
   type        = string
 }
 
-variable "availability_zone" {
-  description = "Availability zone for the public subnet"
-  type        = string
+variable "availability_zones" {
+  description = "Availability zones for the public subnets"
+  type        = list(string)
 }
 
-variable "public_subnet_cidr" {
-  description = "CIDR block for the public subnet"
-  type        = string
+variable "public_subnet_cidrs" {
+  description = "CIDR blocks for the public subnets (one per AZ)"
+  type        = list(string)
 }
 
 variable "tags" {

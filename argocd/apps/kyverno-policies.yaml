@@ -1,19 +1,16 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: kyverno
+  name: kyverno-policies
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   project: default
   source:
     repoURL: https://github.com/baasilmirza/aws-eks-platform.git
-    path: helm/kyverno
+    path: kyverno/policies
     targetRevision: HEAD
-    helm:
-      valueFiles:
-        - values.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno
@@ -21,6 +18,3 @@ spec:
     automated:
       prune: true
       selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-      - ServerSideApply=true

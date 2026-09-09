@@ -14,12 +14,22 @@ variable "vpc_id" {
 }
 
 variable "subnet_ids" {
-  description = "Subnet ids for the node group"
+  description = "Subnet ids for the cluster control plane"
+  type        = list(string)
+}
+
+variable "node_subnet_ids" {
+  description = "Subnet ids for the node group (single AZ)"
   type        = list(string)
 }
 
 variable "instance_type" {
   description = "EC2 instance type for managed node group"
+  type        = string
+}
+
+variable "cluster_admin_principal_arn" {
+  description = "IAM principal ARN granted cluster admin access via an EKS access entry"
   type        = string
 }
 
