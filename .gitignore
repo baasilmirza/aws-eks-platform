@@ -24,3 +24,4 @@ kubeconfig
 # Personal planning docs (kept local only)
 SPEC.md
 INSTRUCTIONS.md
+docs/*blog*.md
